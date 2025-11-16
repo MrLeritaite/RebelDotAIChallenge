@@ -1,0 +1,31 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+
+# Database
+psycopg[binary]
+sqlalchemy
+# LangChain and AI
+langchain
+langchain-core
+langchain-openai
+langchain-postgres
+openai
+
+# Vector Database
+pgvector
+
+# Task Queue
+celery[redis]
+redis
+
+# Data Processing
+numpy
+pydantic
+
+# Environment and Configuration
+python-dotenv
+
+# Development and Testing
+pytest
+pytest-asyncio

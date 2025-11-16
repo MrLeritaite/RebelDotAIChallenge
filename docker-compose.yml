@@ -1,0 +1,136 @@
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rebeldotai_postgres
+    environment:
+      POSTGRES_DB: langchain
+      POSTGRES_USER: langchain
+      POSTGRES_PASSWORD: langchain
+    ports:
+      - "6024:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langchain -d langchain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rebeldotai_network
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: rebeldotai_redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rebeldotai_network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: resources/Dockerfile
+    container_name: rebeldotai_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - API_KEY=${API_KEY}
+      - CACHE_DIR=/app/.data/cache
+    volumes:
+      - ./.data:/app/.data
+      - ./rebeldotaichallenge:/app/rebeldotaichallenge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_healthy
+      data-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - rebeldotai_network
+    restart: unless-stopped
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: .
+      dockerfile: resources/Dockerfile
+    container_name: rebeldotai_celery_worker
+    command: celery -A rebeldotaichallenge.tasks.celery_app worker --loglevel=info --queues=high_priority,low_priority,celery
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - API_KEY=${API_KEY}
+      - CACHE_DIR=/app/.data/cache
+    volumes:
+      - ./.data:/app/.data
+      - ./rebeldotaichallenge:/app/rebeldotaichallenge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "celery", "-A", "rebeldotaichallenge.tasks.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - rebeldotai_network
+    restart: unless-stopped
+
+  # Data Initialization Service
+  data-init:
+    build:
+      context: .
+      dockerfile: resources/Dockerfile
+    container_name: rebeldotai_data_init
+    command: python -m rebeldotaichallenge.utils.add_rag_data
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - API_KEY=${API_KEY}
+      - CACHE_DIR=/app/.data/cache
+    volumes:
+      - ./.data:/app/.data
+      - ./rebeldotaichallenge:/app/rebeldotaichallenge
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rebeldotai_network
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  rebeldotai_network:
+    driver: bridge
